@@ -1,0 +1,33 @@
+# --- Research data: never public ------------------------------------------
+# Submissions, curated records and everything generated from them contain
+# unpublished sample descriptions and personal data (names, ORCIDs).
+data/
+json/
+pdf/
+test/
+benchmark_runs/
+archive/
+
+# Curated examples and the benchmark mapping are derived from real records.
+# Templates: style_examples.example.json, gold/curated_manifest.example.json
+style_examples.json
+gold/*
+!gold/curated_manifest.example.json
+
+# Model and API caches hold document text and model output.
+.llm_cache/
+.llm_debug/
+.lookup_cache/
+
+# Local settings (data curator, Ollama host). Template: .env.example
+.env
+
+# --- Tooling -----------------------------------------------------------------
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.ipynb_checkpoints/
+.idea/
+.vscode/
+.DS_Store

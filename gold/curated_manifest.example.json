@@ -1,0 +1,14 @@
+{
+  "_comment": "Copy to gold/curated_manifest.json. Maps each submitted document (looked up in data/known/ and data/) to the curated record file made from it. 'select' picks records from a file that covers several documents. 'draft' marks unfinished curation (placeholders like ???, empty fields): empty values are then skipped instead of expected to be empty.",
+  "documents": {
+    "sample_submission_institute_a.docx": {
+      "records": "data/known/curated-records-institute-a.json",
+      "note": "final version"
+    },
+    "sample_submission_institute_b.pdf": {
+      "records": "data/known/curated-records-institute-b.json",
+      "select": [0],
+      "draft": true
+    }
+  }
+}

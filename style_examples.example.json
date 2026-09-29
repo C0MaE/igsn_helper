@@ -1,0 +1,11 @@
+{
+  "_comment": "Copy to style_examples.json and replace with titles/abstracts from your own curated records. They are shown to the model as style examples in the writing pass; an example is never shown for the document it was taken from ('source_documents'). Keep the file out of version control if the records are unpublished.",
+  "examples": [
+    {
+      "title": "Basalt Powder Pellet",
+      "abstract": "Basalt powder was mixed with a binder and pressed into a pellet of 13 mm diameter.",
+      "source_documents": ["sample_submission_institute_a.docx"],
+      "from_record": "data/known/curated-records-institute-a.json[0]"
+    }
+  ]
+}
