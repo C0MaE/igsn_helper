@@ -1,21 +1,4 @@
-"""PDF text extraction that keeps the structure the model needs.
-
-pdfplumber's extract_text() reads each page line by line across its full
-width. That is right for tables and single-column letters, but it
-interleaves two-column text, drops filled-in form fields (their values live
-in form widgets, not in the page content) and glues superscript affiliation
-markers to names ("Berg2"). So the text is assembled from words here:
-
-- Lines are built from words by vertical overlap, so a raised superscript
-  stays on its line and is marked <sup>…</sup>.
-- Filled-in form fields become pseudo-words at their position, so a label
-  and its value end up on the same line.
-- Ruled tables are rendered as Markdown tables.
-- Two-column prose is read column by column. Tables must not be split
-  like that (names and ORCIDs would end up in separate lists), so a region
-  only counts as two columns if it looks like prose on both sides.
-- Unreadable fonts ("(cid:12)"), XFA forms and scanned pages are reported.
-"""
+"""PDF text extraction that keeps the structure the model needs."""
 
 from __future__ import annotations
 
@@ -35,29 +18,23 @@ from documents import LoadedDocument, _identifiers, _norm, markdown_table
 
 MIN_CHARS_PER_PAGE = 20
 
-# A word smaller than this share of its line's font size, raised (lowered) by
-# this share of it, is a superscript (subscript).
 SCRIPT_SIZE_RATIO = 0.85
 SCRIPT_SHIFT_RATIO = 0.15
 
-# Two-column detection. The gutter must lie in the middle band of the page,
-# and both sides must look like prose rather than table columns.
 GUTTER_ZONE = (0.35, 0.65)
-MIN_GUTTER = 6.0            # points
+MIN_GUTTER = 6.0
 MIN_COLUMN_LINES = 3
-MIN_COLUMN_WIDTH = 0.25     # share of page width
-MIN_COLUMN_FILL = 0.6       # prose lines fill most of their column
-MIN_WORDS_PER_LINE = 3      # table cells are short
-MAX_INNER_GAP = 3.0         # in font sizes; larger gaps separate table columns
+MIN_COLUMN_WIDTH = 0.25
+MIN_COLUMN_FILL = 0.6
+MIN_WORDS_PER_LINE = 3
+MAX_INNER_GAP = 3.0
 
-UNREADABLE_RATIO = 0.3      # share of unmapped glyphs above which a page is unreadable
+UNREADABLE_RATIO = 0.3
 CID_RE = re.compile(r"\(cid:\d+\)")
 LIGATURES = str.maketrans({"ﬀ": "ff", "ﬁ": "fi", "ﬂ": "fl", "ﬃ": "ffi", "ﬄ": "ffl", "ﬅ": "st", "ﬆ": "st"})
 
 PUSHBUTTON_FLAG = 1 << 16
 
-# pdfminer logs every malformed detail of real-world PDFs ("Could not get
-# FontBBox ..."); problems that matter are reported as loader warnings instead.
 logging.getLogger("pdfminer").setLevel(logging.ERROR)
 
 
@@ -69,7 +46,7 @@ class _Word:
     top: float
     bottom: float
     size: float
-    kind: str = "text"  # text | sup | sub | field
+    kind: str = "text"
 
     @property
     def height(self) -> float:
@@ -79,7 +56,7 @@ class _Word:
 @dataclass
 class _Line:
     words: list[_Word] = field(default_factory=list)
-    block: Optional[str] = None  # pre-rendered content, e.g. a Markdown table
+    block: Optional[str] = None
     block_top: float = 0.0
 
     @property
@@ -95,9 +72,6 @@ class _Line:
         return max(self.bottom - self.top, 0.1)
 
 
-# --- words --------------------------------------------------------------------
-
-
 def _inside(word: dict, bbox: tuple) -> bool:
     x0, top, x1, bottom = bbox
     cx, cy = (word["x0"] + word["x1"]) / 2, (word["top"] + word["bottom"]) / 2
@@ -105,8 +79,6 @@ def _inside(word: dict, bbox: tuple) -> bool:
 
 
 def _text_words(page, exclude: list[tuple]) -> list[_Word]:
-    # extra_attrs=["size"] splits a word where the font size changes, which
-    # separates a superscript from the name it is attached to.
     words = []
     for w in page.extract_words(extra_attrs=["size"], keep_blank_chars=False):
         if any(_inside(w, bbox) for bbox in exclude):
@@ -166,9 +138,6 @@ def _xfa_form(pdf) -> bool:
         return False
 
 
-# --- lines --------------------------------------------------------------------
-
-
 def _group_lines(words: list[_Word]) -> list[_Line]:
     """Words whose vertical extents overlap by half form a line."""
     lines: list[_Line] = []
@@ -209,15 +178,11 @@ def _render(words: list[_Word]) -> str:
         text = {"sup": f"<sup>{w.text}</sup>", "sub": f"<sub>{w.text}</sub>"}.get(w.kind, w.text)
         if prev is not None:
             gap = w.x0 - prev.x1
-            # Words split only by a size change (name + superscript) have no gap.
             if gap > 0.15 * min(prev.size, w.size) or "field" in (w.kind, prev.kind):
                 out += " "
         out += text
         prev = w
     return out
-
-
-# --- columns ------------------------------------------------------------------
 
 
 def _free_intervals(line: _Line, lo: float, hi: float) -> list[tuple[float, float]]:
@@ -306,9 +271,6 @@ def _reading_order(lines: list[_Line], page_width: float) -> list[str]:
     return out
 
 
-# --- page / document -----------------------------------------------------------
-
-
 def _page_text(page) -> tuple[str, int, int]:
     """Returns (text, unmapped glyphs, all glyphs)."""
     chars = page.chars
@@ -342,7 +304,7 @@ def _text_under_link(page, link) -> str:
 
 def load_pdf(path: Path) -> LoadedDocument:
     pages, links, empty, unreadable = [], [], [], []
-    reference = []  # independent extraction for the completeness check
+    reference = []
     with pdfplumber.open(str(path)) as pdf:
         xfa = _xfa_form(pdf)
         for number, page in enumerate(pdf.pages, 1):
@@ -361,7 +323,6 @@ def load_pdf(path: Path) -> LoadedDocument:
     text = "\n\n".join(p for p in pages if p)
     loaded = LoadedDocument(path=path, format="pdf", text=text)
 
-    # ORCID/DOI links behind names or icons are invisible in the text layer.
     extra, seen = [], set()
     for uri, label in links:
         if uri in seen or _norm(uri) in _norm(loaded.text) or uri.startswith("mailto:"):
@@ -384,8 +345,6 @@ def load_pdf(path: Path) -> LoadedDocument:
     if xfa:
         loaded.warnings.append("XFA form: filled-in values may be missing, please check the text")
 
-    # Identifiers seen by pdfplumber's own extraction, in links or in raw form
-    # field values must survive the custom assembly above.
     reference_ids = _identifiers("\n".join(reference + [u for u, _ in links]))
     loaded_text = _norm(re.sub(r"</?su[bp]>", "", loaded.text))
     missing = sorted(i for i in reference_ids if _norm(i) not in loaded_text)

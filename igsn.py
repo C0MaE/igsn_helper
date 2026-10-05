@@ -10,9 +10,6 @@ DescriptionType = Literal[
     "Abstract", "Methods", "SeriesInformation", "TableOfContents", "TechnicalInfo", "Other"
 ]
 
-# DataCite kernel 4.4. The publication types (JournalArticle, Text, ...) matter
-# for relatedIdentifiers: with constrained decoding the model can only pick
-# from this list, and without them it labels cited papers as "Dataset".
 ResourceTypeGeneral = Literal[
     "PhysicalObject",
     "Audiovisual", "Book", "BookChapter", "Collection", "ComputationalNotebook",
@@ -90,7 +87,7 @@ class Title(BaseModel):
 
 class ResourceType(BaseModel):
     resourceTypeGeneral: ResourceTypeGeneral = "PhysicalObject"
-    resourceType: Optional[str] = None  # z.B. "Rock sample", "Borehole core", "Soil"
+    resourceType: Optional[str] = None
 
 
 class Description(BaseModel):
@@ -115,7 +112,7 @@ class Publisher(BaseModel):
 
 
 class Date(BaseModel):
-    date: str  # YYYY, YYYY-MM-DD oder ISO-8601
+    date: str
     dateType: DateType
     dateInformation: Optional[str] = None
 
@@ -143,21 +140,6 @@ class IGSN(BaseModel):
     subjects: List[Subject] = Field(default_factory=list)
     relatedIdentifiers: List[RelatedIdentifier] = Field(default_factory=list)
 
-# --- What the model is asked to fill ------------------------------------------
-#
-# The extraction schema deliberately leaves out everything that is policy
-# rather than content: publisher, schemaVersion, publicationYear,
-# resourceTypeGeneral, doi/url and contributors are set in postprocess.py.
-# Affiliations carry no identifier fields, because RORs rarely appear in
-# submissions and a small model fills them by copying example IDs.
-# Fields without defaults are required, so the model cannot skip them.
-#
-# One document often describes several samples (a table of 17 pellets, six
-# powder mixtures), and each sample gets its own IGSN. What all samples share
-# (people, common keywords, dates, references) is extracted once, so the
-# output stays short even for many samples; postprocess.py merges it into
-# one record per sample.
-
 
 class ExtractedAffiliation(BaseModel):
     name: str
@@ -167,7 +149,7 @@ class ExtractedCreator(BaseModel):
     name: str
     givenName: str
     familyName: str
-    role: str  # as written in the document; mapped to contributorType in code
+    role: str
     nameIdentifiers: List[NameIdentifier]
     affiliation: List[ExtractedAffiliation]
 
@@ -181,9 +163,6 @@ class SharedMetadata(BaseModel):
 
 
 class ExtractedSample(BaseModel):
-    # Pass 1 only copies. Writing a title or abstract where the document has
-    # none made the model loop (it repeated the document's first line), so
-    # prose is written per sample in pass 2 (SampleText) instead.
     sampleCode: str
     givenTitle: str
     givenDescription: str
@@ -196,9 +175,6 @@ class ExtractedSample(BaseModel):
 class IGSNExtraction(BaseModel):
     shared: SharedMetadata
     samples: List[ExtractedSample]
-
-
-# --- What the model writes in pass 2, one call per sample ----------------------
 
 
 class SampleText(BaseModel):

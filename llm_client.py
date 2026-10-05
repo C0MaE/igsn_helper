@@ -1,9 +1,4 @@
-"""LLM backend abstraction with content-hash caching.
-
-The pipeline talks to this module instead of to ollama directly, so that
-switching to vLLM on the HPC cluster later is a config change rather than a
-refactoring. Every call returns the metadata needed for provenance records.
-"""
+"""LLM backend abstraction with content-hash caching."""
 
 from __future__ import annotations
 
@@ -23,24 +18,18 @@ DEBUG_PATH = Path("./.llm_debug")
 
 DEFAULT_MODEL = "qwen3:14b"
 DEFAULT_OPTIONS = {
-    # Qwen3's recommended sampling for non-thinking mode. Greedy decoding
-    # (temperature 0) is explicitly discouraged for Qwen3 because it causes
-    # endless repetition, and it did: the model looped inside a free-text
-    # abstract. The fixed seed keeps runs reproducible on the same machine.
-    # These values are model-specific; revisit them when switching models.
+    # Qwen3 recommendation; temperature 0 makes Qwen3 loop. Revisit for other models.
     "temperature": 0.7,
     "top_p": 0.8,
     "top_k": 20,
     "min_p": 0.0,
     "seed": 0,
     "num_ctx": 16384,
-    # Hard stop for runaway generation. Without it Ollama keeps going past
-    # num_ctx (it drops old context) and a looping model never ends.
-    "num_predict": 8192,
+    "num_predict": 8192,  # hard stop, otherwise a looping model never ends
 }
 
-LOOP_CHECK_EVERY = 32   # chunks
-MIN_LOOP_CHARS = 400    # a pattern must repeat over at least this many chars
+LOOP_CHECK_EVERY = 32
+MIN_LOOP_CHARS = 400
 
 
 class GenerationError(RuntimeError):
@@ -52,19 +41,13 @@ class GenerationError(RuntimeError):
 
 
 def _loop_reason(text: str) -> Optional[str]:
-    """Detect a model stuck repeating itself at the end of its output.
-
-    Legitimate JSON repeats structure, but not the exact same characters
-    hundreds of times in a row.
-    """
+    """Detect a model stuck repeating itself at the end of its output."""
     tail = text[-2000:]
     if len(tail) >= 300 and not tail[-300:].strip():
         return "endless whitespace"
     for period in range(8, 401):
         reps = max(4, -(-MIN_LOOP_CHARS // period))
         span = period * reps
-        # span does not grow monotonically with period (99 -> 495, 100 -> 400),
-        # so a too-short tail only rules out this period, not the longer ones.
         if len(tail) < span:
             continue
         if tail[-span:] == tail[-period:] * reps:
@@ -113,16 +96,7 @@ def sha256_text(text: str) -> str:
 
 @dataclass
 class OllamaClient:
-    """Ollama backend.
-
-    ``host`` defaults to the OLLAMA_HOST environment variable, so the same code
-    runs against a local ollama or against the GPU machine through an SSH
-    tunnel (``ssh -N -L 11434:localhost:11434 uksph-c-ec182``).
-
-    ``keep_alive`` is passed through on every call. The GPU machine is shared,
-    so keep it short while iterating and call ``unload()`` when a batch is done
-    instead of leaving the weights resident.
-    """
+    """Ollama backend."""
 
     model: str = DEFAULT_MODEL
     host: Optional[str] = None
@@ -156,15 +130,7 @@ class OllamaClient:
         schema: Optional[dict] = None,
         think: Optional[bool] = None,
     ) -> LLMResponse:
-        """Send a single-turn prompt.
-
-        ``schema`` is a JSON Schema dict (use ``Model.model_json_schema()``).
-        When given, the sampler is constrained to it, so the response is always
-        parseable and controlled vocabularies cannot be violated.
-
-        ``think`` toggles Qwen3-style reasoning. Turn it off for schema-
-        constrained extraction and on for the verification pass.
-        """
+        """Send a single-turn prompt."""
         key = self._cache_key(prompt, schema, think)
         prompt_hash = sha256_text(prompt)
 
@@ -247,7 +213,7 @@ class OllamaClient:
                     _progress(tokens, start, text, thinking=not parts)
                     reason = _loop_reason(text)
                     if reason:
-                        stream.close()  # disconnecting makes Ollama stop generating
+                        stream.close()
                         raise GenerationError(f"model is looping ({reason}) after {tokens} tokens", dump(reason))
         except KeyboardInterrupt:
             print(f"\n  interrupted, partial output: {dump('interrupted by user')}")

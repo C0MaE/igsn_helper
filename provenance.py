@@ -1,12 +1,4 @@
-"""Provenance records for generated IGSN metadata.
-
-Written as a sidecar file next to each record rather than inside it: the JSON
-in ./json has to stay a valid DataCite kernel-4 document, and an extra
-top-level key would break schema validation on submission.
-
-The point is to be able to answer, a year from now, "which model produced this
-field, from which document, with which prompt" without guessing.
-"""
+"""Provenance records for generated IGSN metadata."""
 
 from __future__ import annotations
 
@@ -38,11 +30,7 @@ def _git_revision() -> Optional[str]:
 
 
 def _git_dirty() -> Optional[bool]:
-    """True if tracked or new files differ from gitRevision.
-
-    Without this flag a record produced by uncommitted code would point to a
-    commit whose prompts and rules it was never generated with.
-    """
+    """True if tracked or new files differ from gitRevision."""
     try:
         result = subprocess.run(
             ["git", "status", "--porcelain", "--untracked-files=normal", "--", "*.py"],

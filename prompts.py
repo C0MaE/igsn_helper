@@ -1,25 +1,9 @@
-"""Extraction prompt.
-
-The JSON structure is enforced by constrained decoding against
-igsn.IGSNExtraction, so the prompt no longer spells out a schema. It carries
-only what the schema cannot express: what counts as a sample, where each
-field comes from, and how to decide between vocabulary values.
-
-Submissions are free text from many institutions without a template, so the
-prompt describes what to look for, not where it sits in a particular form.
-
-Deliberately contains no example values taken from real documents: small
-models copy them into other documents. An earlier prompt showed the Kiel
-University ROR, which ended up in every affiliation; a later one showed a
-role and a mass from one real submission, and every author of an unrelated
-document got that role, and its sample that mass. Examples stay generic,
-and postprocess.verify_extraction drops
-copied values that do not occur in the document.
-"""
+"""Extraction prompt."""
 
 import json
 from pathlib import Path
 
+# No example values from real documents here: small models copy them into other documents.
 IGSN_EXTRACTION_PROMPT = """\
 You extract metadata for registering physical research samples (IGSN) from a
 document a researcher sent in. Use only information written in the document.
@@ -169,8 +153,6 @@ def get_sample_writing_prompt(extraction: dict, index: int, source_document: str
     )
 
 
-# num_ctx is 16384 tokens. ~30k characters of English are ~8-9k tokens, which
-# leaves room for these instructions and the JSON output.
 MAX_DOCUMENT_CHARS = 30000
 
 

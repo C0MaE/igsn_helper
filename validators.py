@@ -1,10 +1,4 @@
-"""Deterministic checks that need no model.
-
-The most damaging failure mode for an IGSN record is a plausible-looking but
-invented identifier: a wrong ORCID silently attributes a sample to a different
-researcher. Every identifier in the output must appear verbatim in the source
-document, and that is a string comparison, not a judgement call.
-"""
+"""Deterministic checks that need no model."""
 
 from __future__ import annotations
 
@@ -21,9 +15,9 @@ SEVERITY_ORDER = {"error": 0, "warning": 1}
 
 @dataclass
 class Finding:
-    severity: str  # "error" | "warning"
-    kind: str      # "orcid" | "doi" | "ror" | "creator-name"
-    path: str      # JSON path where the value was found
+    severity: str
+    kind: str
+    path: str
     value: str
     message: str
 
@@ -38,11 +32,7 @@ class Finding:
 
 
 def _normalize(text: str) -> str:
-    """Collapse whitespace and case so docx extraction artefacts don't matter.
-
-    Extracted .docx text often contains stray spaces inside runs, e.g.
-    "https://orcid.org/0000- 0003-2361-6775".
-    """
+    """Collapse whitespace and case so docx extraction artefacts don't matter."""
     return re.sub(r"\s+", "", text).lower()
 
 
@@ -71,13 +61,10 @@ def check_identifiers(igsn_data: dict, source_text: str) -> list[Finding]:
     for path, value in _walk(igsn_data):
         if not isinstance(value, str) or not value:
             continue
-        # The publisher is a fixed field set in code, so its ROR is expected
-        # to be absent from the questionnaire.
         if path.startswith("publisher."):
             continue
         for kind, pattern in patterns:
             for match in pattern.finditer(value):
-                # ROR_RE captures the bare id; the others match in full.
                 found = match.group(1) if pattern is ROR_RE else match.group(0)
                 if _normalize(found) not in haystack:
                     findings.append(
@@ -101,7 +88,6 @@ def check_creator_names(igsn_data: dict, source_text: str) -> list[Finding]:
         for i, person in enumerate(igsn_data.get(role) or []):
             if not isinstance(person, dict):
                 continue
-            # Fall back to the part before the comma of "LastName, FirstName".
             family = person.get("familyName") or person.get("name", "").split(",")[0]
             family = (family or "").strip()
             if not family:
@@ -190,13 +176,7 @@ def _numbers(text: str) -> set[str]:
 
 
 def check_numbers(igsn_data: dict, source_text: str) -> list[Finding]:
-    """Numbers in the title and abstract must come from the document.
-
-    Title and abstract are written by the model, and a plausible but wrong
-    mass or percentage is the error a reader is least likely to notice.
-    Values a curator computes (e.g. 200 mg - 45.0 mg) are flagged too, which
-    is intended: they need a second look.
-    """
+    """Numbers in the title and abstract must come from the document."""
     allowed = _numbers(source_text)
     texts = [("titles[0].title", ((igsn_data.get("titles") or [{}])[0].get("title") or ""))]
     texts += [(f"descriptions[{i}].description", d.get("description") or "")
@@ -250,7 +230,8 @@ def check_samples(records: list[dict]) -> list[Finding]:
 
 def _without_curators(igsn_data: dict) -> dict:
     """The DataCurator comes from config, not from the document, so it is
-    excluded from the checks that compare the record with the source."""
+    excluded from the checks that compare the record with the source.
+    """
     contributors = [c for c in igsn_data.get("contributors") or []
                     if c.get("contributorType") != "DataCurator"]
     return {**igsn_data, "contributors": contributors}

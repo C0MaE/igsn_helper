@@ -1,22 +1,4 @@
-"""Load submitted documents (.docx, .pdf) as text for the model.
-
-Submissions are free text from different institutions, without a template,
-so the loader must not assume any layout. It must also never lose content
-silently: a document that loses its author table during loading still yields
-a plausible-looking record, and nothing downstream notices. Hence:
-
-- .docx is read from the XML in reading order, including tables, content
-  controls, text boxes, footnotes, headers/footers, automatic numbering and
-  hyperlink targets. python-docx's ``doc.paragraphs`` skips all of these.
-- Superscripts are kept as <sup>…</sup>, because affiliation markers
-  ("Rossi²") are otherwise glued to the name ("Rossi2").
-- Link targets are kept, because ORCIDs are often only a link behind a name
-  or an icon.
-- Afterwards every ORCID and DOI found anywhere in the file is checked
-  against the loaded text. Anything missing is reported.
-- A PDF without a text layer (scanned) is marked fatal instead of sending
-  an empty text to the model.
-"""
+"""Load submitted documents (.docx, .pdf) as text for the model."""
 
 from __future__ import annotations
 
@@ -34,7 +16,6 @@ from validators import DOI_RE, ORCID_RE
 
 SUPPORTED_SUFFIXES = {".docx", ".pdf"}
 
-# Converting these needs LibreOffice or similar; tell the user rather than skip silently.
 CONVERT_HINTS = {
     ".doc": "old Word format, please save as .docx",
     ".odt": "OpenDocument, please save as .docx or .pdf",
@@ -46,7 +27,6 @@ MC_FALLBACK = "{http://schemas.openxmlformats.org/markup-compatibility/2006}Fall
 R_ID = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id"
 HYPERLINK_FIELD_RE = re.compile(r'HYPERLINK\s+"([^"]+)"')
 
-# Below this many characters per page a PDF page is treated as having no text layer.
 MIN_CHARS_PER_PDF_PAGE = 20
 
 
@@ -56,7 +36,7 @@ class LoadedDocument:
     format: str
     text: str
     warnings: list[str] = field(default_factory=list)
-    fatal: bool = False  # True: do not send to the model
+    fatal: bool = False
 
     def provenance(self) -> dict:
         return {"format": self.format, "loaderWarnings": self.warnings}
@@ -85,9 +65,6 @@ def markdown_table(rows: list[list[str]]) -> str:
     lines = ["| " + " | ".join(rows[0]) + " |", "|" + " --- |" * width]
     lines += ["| " + " | ".join(r) + " |" for r in rows[1:]]
     return "\n".join(lines)
-
-
-# --- docx ---------------------------------------------------------------------
 
 
 def _roman(n: int) -> str:
@@ -155,7 +132,7 @@ class _Numbering:
         ilvl = (direct or (None, None))[1]
         if ilvl is None:
             ilvl = (style_num or (None, 0))[1] or 0
-        if num_id is None or num_id == "0":  # none, or explicitly removed
+        if num_id is None or num_id == "0":
             return ""
         fmt, start, template = self.levels.get((num_id, ilvl), ("bullet", 1, None))
         indent = "  " * ilvl
@@ -166,7 +143,6 @@ class _Numbering:
         for deeper in [k for k in counters if k > ilvl]:
             del counters[deeper]
 
-        # lvlText is Word's label template: "%1." , "(%1)", "%1.%2." ...
         def level_label(match):
             level = int(match.group(1)) - 1
             level_fmt, level_start, _ = self.levels.get((num_id, level), ("decimal", 1, None))
@@ -196,7 +172,6 @@ class _DocxRenderer:
                 except ValueError:
                     pass
 
-    # Blocks: paragraphs, tables, content controls
     def blocks(self, container, links: dict) -> str:
         out = []
         for child in container:
@@ -269,7 +244,6 @@ class _DocxRenderer:
                 field_urls.extend(HYPERLINK_FIELD_RE.findall(child.get(qn("w:instr")) or ""))
                 parts.append(self.inline(child, links, field_urls))
             else:
-                # smartTag, ins, sdt, AlternateContent/Choice, drawing, ...
                 parts.append(self.inline(child, links, field_urls))
         return "".join(parts)
 
@@ -319,8 +293,6 @@ def _load_docx(path: Path) -> LoadedDocument:
     if notes:
         sections.append("## Footnotes\n" + "\n".join(notes))
 
-    # Letterheads often carry the institution. Headers repeat per section,
-    # so keep each distinct text once.
     seen, margins = set(), []
     for suffix in ("/header", "/footer"):
         for part in _related_parts(doc, suffix):
@@ -338,12 +310,7 @@ def _load_docx(path: Path) -> LoadedDocument:
 
 
 def _check_docx_completeness(path: Path, loaded: LoadedDocument) -> None:
-    """Compare identifiers in the raw file with the loaded text.
-
-    Deliberately independent of the renderer above: every text node of every
-    XML part plus every external link target, so a renderer bug shows up
-    here instead of as a silently thinner record.
-    """
+    """Compare identifiers in the raw file with the loaded text."""
     raw_chunks = []
     with zipfile.ZipFile(path) as z:
         for name in z.namelist():
@@ -369,16 +336,9 @@ def _check_docx_completeness(path: Path, loaded: LoadedDocument) -> None:
         )
 
 
-# --- pdf ----------------------------------------------------------------------
-
-
 def _load_pdf(path: Path) -> LoadedDocument:
-    # Imported lazily: pdf_loader imports this module's helpers.
     from pdf_loader import load_pdf
     return load_pdf(path)
-
-
-# --- entry points ---------------------------------------------------------------
 
 
 LOADERS = {".docx": _load_docx, ".pdf": _load_pdf}
@@ -387,7 +347,8 @@ LOADERS = {".docx": _load_docx, ".pdf": _load_pdf}
 def is_input_file(path: Path) -> bool:
     """Files that can be submissions: supported formats and those we can give a
     conversion hint for. Skips Word lock files (~$x.docx), hidden files,
-    directories and everything else (e.g. finished records as .json)."""
+    directories and everything else (e.g. finished records as .json).
+    """
     return (path.is_file()
             and not path.name.startswith(("~$", "."))
             and path.suffix.lower() in SUPPORTED_SUFFIXES | CONVERT_HINTS.keys())
@@ -407,8 +368,6 @@ def load_document(path: Path) -> LoadedDocument:
 
 
 if __name__ == "__main__":
-    # Preview what the model will see, without calling it:
-    #   uv run python documents.py data/antrag.pdf [more files or folders ...]
     import sys
 
     if len(sys.argv) < 2:

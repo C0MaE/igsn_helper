@@ -1,9 +1,4 @@
-"""Local settings from a .env file next to this module.
-
-Values are only used where the environment does not already set them, so a
-variable exported in the shell wins over the file. Any variable can live in
-.env, including OLLAMA_HOST for the GPU server; see .env.example.
-"""
+"""Local settings from a .env file next to this module."""
 
 from __future__ import annotations
 
@@ -28,7 +23,7 @@ def load_env(path: Path = ENV_PATH) -> None:
         value = value.strip()
         if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
             value = value[1:-1]
-        elif value.startswith("#"):  # KEY=   # comment  -> empty value
+        elif value.startswith("#"):
             value = ""
         elif " #" in value:
             value = value.split(" #", 1)[0].rstrip()
@@ -36,12 +31,7 @@ def load_env(path: Path = ENV_PATH) -> None:
 
 
 def data_curator() -> Optional[dict]:
-    """The DataCurator contributor added to every record, from IGSN_CURATOR_*.
-
-    Returns None if IGSN_CURATOR_NAME is not set. Raises ValueError for a
-    malformed name or ORCID, so a typo fails at start-up instead of ending
-    up in every record.
-    """
+    """The DataCurator contributor added to every record, from IGSN_CURATOR_*."""
     name = os.environ.get("IGSN_CURATOR_NAME", "").strip()
     if not name:
         return None

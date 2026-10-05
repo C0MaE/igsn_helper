@@ -1,27 +1,4 @@
-"""Score pipeline output against the curated records in data/known.
-
-    uv run python benchmark.py            # score the existing outputs in ./json
-    uv run python benchmark.py --run      # run the pipeline on the benchmark documents first
-    uv run python benchmark.py --details  # list every failed check
-
-Curated records contain more than the submission does: curators look up full
-given names and ROR IDs, compute masses and add dates they got by e-mail. An
-extractor cannot find those, so every expected value is classified by
-whether it appears in the submitted document:
-
-- document: it does, so extraction should get it right; this is the score
-- curator:  it does not; reported separately and never counted as an error
-- policy:   fixed by repository rules (publisher, resourceType, data curator)
-- skipped:  the curated record is a draft and the value is a placeholder
-
-Titles and abstracts are written, not extracted, so they get similarity
-scores; only the document values inside a curated abstract (masses,
-percentages) are scored as facts. publicationYear is not scored: it is the
-year of registration, not a property of the document.
-
-Which curated file belongs to which document is set in
-gold/curated_manifest.json.
-"""
+"""Score pipeline output against the curated records in data/known."""
 
 from __future__ import annotations
 
@@ -46,15 +23,15 @@ DOCUMENT_DIRS = [Path("data/known"), Path("data")]
 OUTPUT_PATH = Path("json")
 RUNS_PATH = Path("benchmark_runs")
 PLACEHOLDER = "???"
-MIN_MATCH_SCORE = 0.01    # optimal pairing decides; only drop pairs with nothing in common
-UNCERTAIN_MARGIN = 0.1   # a pairing this close to the runner-up is flagged
-MAX_EXHAUSTIVE = 8       # up to this many samples, try every pairing
+MIN_MATCH_SCORE = 0.01
+UNCERTAIN_MARGIN = 0.1
+MAX_EXHAUSTIVE = 8
 NUMBER_RE = re.compile(r"\d+(?:[.,]\d+)?")
 
 
 @dataclass
 class Check:
-    category: str  # document | policy | curator | skipped | writing
+    category: str
     field: str
     passed: Optional[bool]
     expected: Any = None
@@ -62,11 +39,8 @@ class Check:
     sample: Optional[str] = None
 
 
-# --- normalization ---------------------------------------------------------------
-
-
 def _norm(text: Any) -> str:
-    text = unicodedata.normalize("NFKC", str(text or ""))  # H₂O -> H2O
+    text = unicodedata.normalize("NFKC", str(text or ""))
     text = re.sub(r"</?su[bp]>", "", text)
     return re.sub(r"\s+", " ", text).strip().lower()
 
@@ -93,7 +67,7 @@ def _ident(value: str) -> str:
     return _norm(re.sub(r"^https?://[^/]+/(sample/)?", "", value or ""))
 
 
-_date_forms = date_forms  # shared with the pipeline's date check
+_date_forms = date_forms
 
 
 class Source:
@@ -110,9 +84,6 @@ class Source:
     def contains_date(self, value: str) -> bool:
         parts = [p for p in value.split("/") if p]
         return bool(parts) and all(any(self.contains(f) for f in _date_forms(p)) for p in parts)
-
-
-# --- records ----------------------------------------------------------------------
 
 
 def _title(record: dict) -> str:
@@ -139,15 +110,9 @@ def _tokens(record: dict) -> Counter:
 
 
 def _similarity_matrix(gold: list[dict], ours: list[dict]) -> list[list[float]]:
-    """TF-IDF cosine over title and abstract, or sample-code equality.
-
-    Words shared by all samples of a document ("sodium chloride") carry no
-    weight; words only some samples have ("silicon", "80") decide.
-    """
+    """TF-IDF cosine over title and abstract, or sample-code equality."""
     counts = [_tokens(r) for r in gold + ours]
     df = Counter(t for c in counts for t in c)
-    # Smoothed: with plain log(N/df), a word shared by the only two texts
-    # (one curated, one generated sample) would weigh 0 and nothing matches.
     idf = {t: math.log(1 + len(counts) / n) for t, n in df.items()}
     vectors = [{t: n * idf[t] for t, n in c.items()} for c in counts]
 
@@ -162,20 +127,13 @@ def _similarity_matrix(gold: list[dict], ours: list[dict]) -> list[list[float]]:
         for oi, o in enumerate(ours):
             gc, oc = _flat(_code(g)), _flat(_code(o))
             text = cosine(vectors[gi], vectors[len(gold) + oi])
-            # Equal codes decide. Different codes do not rule a pair out: the
-            # generated code may simply be wrong, which the sample code check
-            # then reports. Text similarity is capped so a code match wins.
             row.append(1.0 if gc and oc and gc == oc else 0.9 * text)
         matrix.append(row)
     return matrix
 
 
 def match_records(gold: list[dict], ours: list[dict]) -> tuple[list[tuple[int, int]], list[tuple[int, int]]]:
-    """Pair curated and generated records of one document.
-
-    Returns (pairs, uncertain): uncertain pairs had a runner-up almost as
-    good, so their per-sample results may compare the wrong samples.
-    """
+    """Pair curated and generated records of one document."""
     if not gold or not ours:
         return [], []
     S = _similarity_matrix(gold, ours)
@@ -206,9 +164,6 @@ def match_records(gold: list[dict], ours: list[dict]) -> tuple[list[tuple[int, i
     return pairs, uncertain
 
 
-# --- checks -----------------------------------------------------------------------
-
-
 def _score_record(g: dict, o: dict, src: Source, draft: bool, label: str, checks: list[Check]) -> None:
     def add(category, field, passed, expected=None, got=None):
         checks.append(Check(category, field, passed, expected, got, label))
@@ -223,7 +178,6 @@ def _score_record(g: dict, o: dict, src: Source, draft: bool, label: str, checks
         else:
             add(where(code), "sample code", _flat(code) == _flat(_code(o)), code, _code(o))
 
-    # People
     ours_creators = {_flat(_family(c)): c for c in o.get("creators") or []}
     gold_creators = g.get("creators") or []
     if gold_creators or not draft:
@@ -268,7 +222,6 @@ def _score_record(g: dict, o: dict, src: Source, draft: bool, label: str, checks
         add("document", f"contributor {who}: role", match is not None and match.get("contributorType") == gc.get("contributorType"),
             gc.get("contributorType"), match and match.get("contributorType"))
 
-    # Dates
     ours_dates = {(d.get("date"), d.get("dateType")) for d in o.get("dates") or []}
     gold_dates = [d for d in g.get("dates") or [] if d.get("date") and not _placeholder(d.get("date"))]
     for d in g.get("dates") or []:
@@ -282,7 +235,6 @@ def _score_record(g: dict, o: dict, src: Source, draft: bool, label: str, checks
         extra = sorted(f"{a} {b}" for a, b in ours_dates - {(d["date"], d.get("dateType")) for d in gold_dates})
         add("document", "dates: no extras", not extra, [], extra)
 
-    # Keywords and related identifiers
     ours_subjects = [_flat(s.get("subject")) for s in o.get("subjects") or [] if s.get("subject")]
     for s in g.get("subjects") or []:
         value = s.get("subject", "")
@@ -296,8 +248,6 @@ def _score_record(g: dict, o: dict, src: Source, draft: bool, label: str, checks
             continue
         add(where(_ident(value)), f"related {value}", _ident(value) in ours_related, value, sorted(ours_related))
 
-    # Title and abstract: written text, scored by similarity; document values
-    # quoted in the curated abstract are scored as facts.
     gold_abstract, ours_abstract = _abstract(g), _abstract(o)
     add("writing", "title similarity", None, _title(g), round(_similarity(_title(g), _title(o)), 3))
     if gold_abstract:
@@ -308,7 +258,6 @@ def _score_record(g: dict, o: dict, src: Source, draft: bool, label: str, checks
     elif draft:
         add("skipped", "abstract", None, "")
 
-    # Repository policy
     add("policy", "publisher", _norm((o.get("publisher") or {}).get("name")) == _norm((g.get("publisher") or {}).get("name")),
         (g.get("publisher") or {}).get("name"), (o.get("publisher") or {}).get("name"))
     for key in ("resourceTypeGeneral", "resourceType"):
@@ -348,9 +297,6 @@ def summarize(checks: list[Check]) -> dict:
     }
 
 
-# --- documents ----------------------------------------------------------------------
-
-
 def load_manifest() -> dict:
     if not MANIFEST_PATH.exists():
         return {}
@@ -381,7 +327,6 @@ def evaluate_document(source_name: str, records: list[dict], source_text: str) -
     pairs, uncertain = match_records(gold, records)
     checks.append(Check("document", "sample count", len(gold) == len(records), len(gold), len(records)))
     for gi, oi in pairs:
-        # The curated side names the sample: its code, else its position there.
         label = _code(gold[gi]) or f"curated #{gi + 1}"
         _score_record(gold[gi], records[oi], src, draft, label, checks)
     for gi in sorted(set(range(len(gold))) - {p[0] for p in pairs}):
@@ -439,7 +384,7 @@ def _find_document(name: str) -> Optional[Path]:
 
 
 def _output_file(document: Path) -> Path:
-    from main import _safe_name  # same naming as the pipeline
+    from main import _safe_name
     return OUTPUT_PATH / f"{_safe_name(document.stem)}.json"
 
 

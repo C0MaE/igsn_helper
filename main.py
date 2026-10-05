@@ -18,8 +18,6 @@ PATH.mkdir(exist_ok=True)
 JSON_OUTPUT_PATH = Path("./json")
 JSON_OUTPUT_PATH.mkdir(exist_ok=True)
 
-# The model fills only the content fields; fixed fields and policies are
-# added by postprocess.build_record.
 EXTRACTION_SCHEMA = IGSNExtraction.model_json_schema()
 SAMPLE_TEXT_SCHEMA = SampleText.model_json_schema()
 
@@ -69,8 +67,6 @@ def extract_data_to_json(client: OllamaClient, file_data: str):
     prompt = get_igsn_extraction_prompt(file_data)
     print(f"  └─ Prompt length: {len(prompt)} characters")
 
-    # Thinking off: the schema constrains the output anyway, and reasoning
-    # tokens only cost time here.
     response = client.chat(prompt, schema=EXTRACTION_SCHEMA, think=False)
 
     if response.cached:
@@ -78,19 +74,13 @@ def extract_data_to_json(client: OllamaClient, file_data: str):
     else:
         print(f"Response from Ollama received ({format_time(response.duration_s)})")
 
-    # Constrained decoding guarantees parseable JSON, so no fence stripping.
     result = json.loads(response.content)
     print("JSON parsed successfully")
     return result, response, prompt
 
 
 def write_sample_texts(client: OllamaClient, extraction: dict, source_name: str, recorder):
-    """Pass 2: title and abstract per sample, one short call each.
-
-    Returns (texts, notes): texts[i] is None where writing failed, so that
-    sample falls back to the copied text; notes are (index, issue) pairs the
-    model flagged for a curator.
-    """
+    """Pass 2: title and abstract per sample, one short call each."""
     samples = extraction.get("samples") or []
     print(f"Writing titles and abstracts for {len(samples)} sample(s)...")
     texts, notes = [], []
@@ -117,7 +107,8 @@ def _safe_name(text: str, limit: int = 60) -> str:
 
 def save_igsn_data(documents):
     """One JSON list per source document, named after it, like the curated
-    igsn-request-*.json files. documents: [(source_file, records, recorder)]"""
+    igsn-request-*.json files. documents: [(source_file, records, recorder)]
+    """
     print(f"\nSaving records of {len(documents)} document(s)...")
 
     saved_files = []
@@ -182,7 +173,7 @@ def main(model=None, host=None, use_cache=True, max_tokens=None, files=None, wri
     print(f"  └─ {len(data)} document(s) loaded ({format_time(convert_time)})\n")
 
     print("=" * 50)
-    processed = []  # (source_file, records, recorder)
+    processed = []
     extraction_start = time.time()
     for idx, document in enumerate(data, 1):
         source_file, file_data = document.path, document.text
@@ -193,8 +184,6 @@ def main(model=None, host=None, use_cache=True, max_tokens=None, files=None, wri
             extraction, response, prompt = extract_data_to_json(client, file_data)
             recorder.record_pass("extract", response, prompt)
 
-            # Pass 1 only copies; drop what is not in the document before
-            # the writing pass builds prose on it.
             extraction, verify_changes = verify_extraction(extraction, file_data)
             recorder.record_changes(verify_changes)
             for change in verify_changes:
@@ -226,8 +215,7 @@ def main(model=None, host=None, use_cache=True, max_tokens=None, files=None, wri
             validators.print_findings(findings)
             recorder.record_findings(findings)
 
-            # After validation: the checks above compare the record with the
-            # document; ORCID and ROR data comes from outside it.
+            # After validation: ORCID/ROR data does not come from the document.
             records, lookup_changes, lookup_findings = enrich.enrich_records(records, lookup)
             recorder.record_changes(lookup_changes)
             recorder.record_findings(lookup_findings)
@@ -263,7 +251,6 @@ def main(model=None, host=None, use_cache=True, max_tokens=None, files=None, wri
 
     extraction_time = time.time() - extraction_start
 
-    # Shared machine: give the VRAM back once the batch is done.
     client.unload()
 
     print("=" * 50)

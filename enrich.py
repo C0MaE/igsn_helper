@@ -1,22 +1,4 @@
-"""Complete records with ORCID and ROR lookups, as curators do by hand.
-
-    uv run python enrich.py json/<document>.json [...]   # enrich finished outputs afterwards
-    uv run python enrich.py --offline json/...           # only use cached lookups
-
-- ORCID: every ORCID taken from the document is looked up in the public
-  ORCID registry. The registered name replaces the document's ("Rossi, A."
-  -> "Rossi, Anna"). If the family names disagree, the registry name
-  is used as well but flagged for review: the document may have swapped
-  given and family name ("K. Ahmed" registered as "Hassan, Karim Ahmed").
-- ROR: every affiliation without an identifier is sent to ROR's affiliation
-  matching. Only a match ROR marks as chosen (unambiguous) is used; it sets
-  the organization's English name and ROR ID, as in the curated records.
-
-No account is needed for either API. Answers are cached in .lookup_cache,
-so reruns and tests work offline. Without network the pipeline runs as
-before and says that lookups were skipped; this script can then enrich the
-outputs later on a machine with internet access.
-"""
+"""Complete records with ORCID and ROR lookups, as curators do by hand."""
 
 from __future__ import annotations
 
@@ -72,12 +54,11 @@ class Lookup:
                 data = json.load(response)
         except urllib.error.HTTPError as e:
             if e.code == 404:
-                data = {}  # e.g. an ORCID that does not exist: a valid, cacheable answer
+                data = {}
             else:
                 self.errors.append(f"{url}: HTTP {e.code}")
                 return None
         except (urllib.error.URLError, TimeoutError, OSError) as e:
-            # No network (e.g. the GPU server): skip the remaining lookups too.
             self.errors.append(f"{url}: {e}")
             self.offline = True
             return None
@@ -94,13 +75,7 @@ class Lookup:
         return (given, family) if given and family else None
 
     def ror(self, affiliation: str) -> Optional[tuple[str, str]]:
-        """(ROR ID URL, English name) of an unambiguous match, or None.
-
-        Curated records use English names. Some organizations have only a
-        native-language label in ROR (many German universities) and their
-        English forms as aliases; then the English alias
-        closest to the document's wording is used.
-        """
+        """(ROR ID URL, English name) of an unambiguous match, or None."""
         data = self._get(ROR_URL.format(query=urllib.parse.quote(affiliation)))
         chosen = next((item for item in (data or {}).get("items", []) if item.get("chosen")), None)
         if not chosen:
@@ -113,9 +88,6 @@ class Lookup:
             return org["id"], english
         if display and display.get("lang") in ("en", None):
             return org["id"], display["value"]
-        # Aliases can be former names (an institute renamed years ago keeps
-        # its old English name as alias), so an alias only wins if it is
-        # closer to how the document names the organization.
         candidates = ([display["value"]] if display else []) + [
             n["value"] for n in names if "alias" in n.get("types", []) and n.get("lang") == "en"]
         if not candidates:
@@ -126,7 +98,8 @@ class Lookup:
 
 def _cased(registered: str, document: str) -> str:
     """Registry names are sometimes all caps ("ROSSI"). Keep the document's
-    spelling when it is the same name, else fix all-caps or all-lowercase."""
+    spelling when it is the same name, else fix all-caps or all-lowercase.
+    """
     if document and _plain(document) == _plain(registered) and not document.isupper():
         return document
     if registered.isupper() or registered.islower():
@@ -183,10 +156,10 @@ def enrich_records(records: list[dict], lookup: Lookup) -> tuple[list[dict], lis
         for role in ("creators", "contributors"):
             for j, person in enumerate(record.get(role) or []):
                 if person.get("contributorType") == "DataCurator":
-                    continue  # comes from .env, not from the document
+                    continue
                 _enrich_person(person, lookup, changes, findings, f"records[{i}].{role}[{j}]")
                 _enrich_affiliations(person, lookup, changes, unmatched)
-    changes = list(dict.fromkeys(changes))  # the same person appears in every sample
+    changes = list(dict.fromkeys(changes))
     changes += [f"no unambiguous ROR match for affiliation {text!r}" for text in sorted(unmatched)]
     if lookup.errors:
         changes.append(f"lookups skipped, no connection ({len(lookup.errors)} failed): {lookup.errors[0]}")

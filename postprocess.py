@@ -1,14 +1,4 @@
-"""Turn the model's extraction into a complete IGSN record.
-
-Everything that is policy rather than content is decided here, not by the
-model: an 8B model reliably extracts names and dates from a submission,
-but it also copies example identifiers from the prompt, calls samples
-"Dataset" and guesses publication years. Deciding those in code makes them
-correct for every model size.
-
-Every intervention is returned as a human-readable change, so the provenance
-record shows where the code overrode or dropped something the model produced.
-"""
+"""Turn the model's extraction into a complete IGSN record."""
 
 from __future__ import annotations
 
@@ -27,13 +17,11 @@ PUBLISHER = {
     "schemeURI": "https://ror.org/",
 }
 SCHEMA_VERSION = "http://datacite.org/schema/kernel-4"
-RESOURCE_TYPE_GENERAL = "PhysicalObject"  # an IGSN always identifies a physical sample
-RESOURCE_TYPE = "Material sample"          # repository convention, as in all curated records
+# Repository conventions; adjust for another repository.
+RESOURCE_TYPE_GENERAL = "PhysicalObject"
+RESOURCE_TYPE = "Material sample"
 DEFAULT_LANGUAGE = "en"
 
-# The questionnaire's last section invites "a different publication year if
-# the resource has already been published". Only a year stated there counts;
-# years elsewhere belong to sample history or cited papers.
 ADDITIONAL_INFO_MARKER = "Additional information"
 PUBLICATION_YEAR_RE = re.compile(r"publi\w*[^.\n]{0,80}?\b((?:19|20)\d{2})\b", re.IGNORECASE)
 
@@ -127,13 +115,7 @@ SCRIPT_RE = re.compile(r"<(sub|sup)>(.*?)</\1>", re.DOTALL)
 
 
 def _plain(value):
-    """Turn the loader's <sub>/<sup> markup into plain Unicode text.
-
-    The markup tells the model that "Co<sub>3</sub>O<sub>4</sub>" is a formula
-    and "Rossi<sup>2</sup>" an affiliation marker; DataCite fields are plain
-    text, so records get "Co₃O₄". Scripts without a Unicode form keep their
-    characters and lose only the tags.
-    """
+    """Turn the loader's <sub>/<sup> markup into plain Unicode text."""
     if isinstance(value, str):
         def convert(match):
             table = SUBSCRIPTS if match.group(1) == "sub" else SUPERSCRIPTS
@@ -148,10 +130,7 @@ def _plain(value):
     return value
 
 
-# Roles as written in submissions -> DataCite contributorType. Derived from
-# the curated records: the curators map leads, supervisors, PIs and sample
-# owners to ContactPerson. First match wins, so specific entries come first.
-# Adjust here when the repository practice changes.
+# Document roles -> DataCite contributorType, as the curators map them. First match wins.
 ROLE_MAP = [
     (r"data\s*curat", "DataCurator"),
     (r"data\s*manag", "DataManager"),
@@ -183,21 +162,16 @@ MONTHS |= {"mär": 3, "mai": 5, "okt": 10, "dez": 12}
 
 
 def _iso_date(value: str) -> Optional[str]:
-    """Unambiguous date notations to ISO 8601; None if not safely convertible.
-
-    Pass 1 copies dates as written ("25.06.2026", "12 March 2023"), and
-    DataCite requires ISO 8601. Slash dates like 03/04/2025 differ between
-    US and European use, so they are not guessed.
-    """
+    """Unambiguous date notations to ISO 8601; None if not safely convertible."""
     v = value.strip()
     if re.fullmatch(r"\d{4}(-\d{2}(-\d{2})?)?(/\d{4}(-\d{2}(-\d{2})?)?)?", v):
-        return v  # already ISO, including ranges
-    m = re.fullmatch(r"(\d{1,2})\.\s?(\d{1,2})\.\s?(\d{4})", v)  # 25.06.2026
+        return v
+    m = re.fullmatch(r"(\d{1,2})\.\s?(\d{1,2})\.\s?(\d{4})", v)
     if m:
         d, mo, y = map(int, m.groups())
     else:
-        m = (re.fullmatch(r"(\d{1,2})\.?\s+([A-Za-zä]+)\.?\s+(\d{4})", v)          # 12 March 2023
-             or re.fullmatch(r"([A-Za-zä]+)\.?\s+(\d{1,2}),?\s+(\d{4})", v))        # March 12, 2023
+        m = (re.fullmatch(r"(\d{1,2})\.?\s+([A-Za-zä]+)\.?\s+(\d{4})", v)
+             or re.fullmatch(r"([A-Za-zä]+)\.?\s+(\d{1,2}),?\s+(\d{4})", v))
         if not m:
             return None
         a, b, y = m.groups()
@@ -218,7 +192,6 @@ def _dates(items: list[dict], changes: list[str]) -> list[dict]:
         item = dict(item)
         raw = str(item.get("date") or "")
         if not re.search(r"\d{4}", raw):
-            # Not a date at all, e.g. the model put "Created" into the date field.
             changes.append(f"dropped {item.get('dateType') or 'date'} entry without a date: {raw!r}")
             continue
         iso = _iso_date(raw)
@@ -234,7 +207,6 @@ def _dates(items: list[dict], changes: list[str]) -> list[dict]:
 def _fallback_text(sample: dict, shared: dict) -> tuple[str, str]:
     """Title and abstract assembled from copied text, without the writing pass."""
     facts = [f.strip().rstrip(".") for f in sample.get("facts") or [] if f.strip()]
-    # "Molecular formula: CaMoO4" -> "CaMoO4"
     title = ((sample.get("givenTitle") or "").strip()
              or (re.sub(r"^[^:]{1,40}:\s*", "", facts[0]) if facts else "")
              or (sample.get("sampleCode") or "").strip())
@@ -246,11 +218,7 @@ def _fallback_text(sample: dict, shared: dict) -> tuple[str, str]:
 
 
 def _titles(sample: dict, title: str, number: int, haystack: str, changes: list[str]) -> list[dict]:
-    """The title, plus the document's own sample code as AlternativeTitle.
-
-    The code is how the submitter refers to the sample ("S-01"), so it is
-    only kept if it appears verbatim in the document.
-    """
+    """The title, plus the document's own sample code as AlternativeTitle."""
     title = (title or "").strip()
     titles = [{"title": title, "lang": "en-US"}] if title else []
     code = (sample.get("sampleCode") or "").strip()
@@ -262,10 +230,8 @@ def _titles(sample: dict, title: str, number: int, haystack: str, changes: list[
     return titles
 
 
-# --- copy verification of pass 1 ---------------------------------------------------
-
-SHINGLE = 4               # words per shingle when comparing longer copied text
-MIN_COPIED_RATIO = 0.8    # share of a long text's shingles that must occur in the document
+SHINGLE = 4
+MIN_COPIED_RATIO = 0.8
 
 
 def _plain_source(source_text: str) -> str:
@@ -273,11 +239,7 @@ def _plain_source(source_text: str) -> str:
 
 
 def _copied_ratio(text: str, source_text: str) -> float:
-    """How much of a longer text occurs in the document, by 4-word shingles.
-
-    Tolerates small edits (quotes, dashes, merged paragraphs) that an exact
-    substring test would reject.
-    """
+    """How much of a longer text occurs in the document, by 4-word shingles."""
     words = lambda t: re.findall(r"\w+", re.sub(r"</?su[bp]>", "", t).lower())
     ours, theirs = words(text), words(source_text)
     grams = lambda w: {tuple(w[i:i + SHINGLE]) for i in range(len(w) - SHINGLE + 1)}
@@ -287,16 +249,11 @@ def _copied_ratio(text: str, source_text: str) -> float:
     return len(mine & grams(theirs)) / len(mine)
 
 
-ROLE_WINDOW = 80  # characters between a role and the person's name in the document
+ROLE_WINDOW = 80
 
 
 def _tokens_in_source(text: str, source_text: str) -> bool:
-    """Every number and every content word of text occurs in the document.
-
-    For short copied values that the model may re-punctuate: "2.5 g, 1.2 g,
-    0.8 g" for "2.5 g, 1.2 g and 0.8 g". A value from elsewhere ("45.0 mg"
-    in a document without that number) fails.
-    """
+    """Every number and every content word of text occurs in the document."""
     tokenize = lambda t: {w.strip(".").lower() for w in re.findall(r"[\w.]+", re.sub(r"</?su[bp]>", "", t))}
     source = tokenize(source_text)
     needed = {w for w in tokenize(text) if any(ch.isdigit() for ch in w) or len(w) >= 4}
@@ -304,11 +261,7 @@ def _tokens_in_source(text: str, source_text: str) -> bool:
 
 
 def _role_near_name(role: str, family_name: str, source_text: str) -> bool:
-    """A role counts only where it is written next to the person's name.
-
-    A form heading like "list of all involved contributors ... their role"
-    contains role-like words far away from any name.
-    """
+    """A role counts only where it is written next to the person's name."""
     text = re.sub(r"\s+", " ", re.sub(r"</?su[bp]>", "", source_text)).lower()
     role, name = role.strip().lower(), family_name.strip().lower()
     if not role or not name:
@@ -328,12 +281,7 @@ def _is_copied(text: str, source_text: str, haystack: str) -> bool:
 
 
 def _recover_orcids(people: list[dict], source_text: str, changes: list[str]) -> None:
-    """Give a person the ORCID written right after their name if the model missed it.
-
-    The search stops at the next person's name, so an ORCID two names further
-    on ("A. Berg, B. Lind, C. Holm (orcid)") is not taken for the
-    person without one.
-    """
+    """Give a person the ORCID written right after their name if the model missed it."""
     text = re.sub(r"\s+", " ", re.sub(r"</?su[bp]>", "", source_text))
     lower = text.lower()
     families = [(p.get("familyName") or (p.get("name") or "").split(",")[0]).strip() for p in people]
@@ -354,37 +302,27 @@ def _recover_orcids(people: list[dict], source_text: str, changes: list[str]) ->
                 break
 
 
-# "... treated with solvent X (GEL-01_X)": a code in parentheses closing a title
 TITLE_CODE_RE = re.compile(r"\(([^()]{2,40})\)\s*\.?\s*$")
 
 
 def _code_from_title(sample: dict, where: str, changes: list[str]) -> None:
-    """Prefer the code a title ends with over one taken from elsewhere.
-
-    The model tends to pick any ID-like token, e.g. a beamtime number that
-    all samples share, while submitters often close the title with the
-    sample's own code.
-    """
+    """Prefer the code a title ends with over one taken from elsewhere."""
     title, code = sample.get("givenTitle") or "", (sample.get("sampleCode") or "").strip()
+    if code and (len(code.split()) > 3 or len(code) > 40):
+        changes.append(f"{where}: dropped sample code {code[:50]!r}...: a title, not a code")
+        sample["sampleCode"] = code = ""
     match = TITLE_CODE_RE.search(title)
     if not match:
         return
     candidate = match.group(1).strip()
     looks_like_code = len(candidate.split()) <= 2 and re.search(r"[\d_]|[A-Z]{2,}", candidate)
-    if looks_like_code and _normalize(candidate) != _normalize(code) and _normalize(code) not in _normalize(title):
+    if looks_like_code and _normalize(candidate) != _normalize(code) and (not code or _normalize(code) not in _normalize(title)):
         sample["sampleCode"] = candidate
         changes.append(f"{where}: sample code {code or '(none)'!r} replaced by {candidate!r} from the end of its title")
 
 
 def verify_extraction(extraction: dict, source_text: str) -> tuple[dict, list[str]]:
-    """Drop pass-1 values that are not copied from the document.
-
-    Pass 1 is instructed to copy only, which makes copying checkable. Small
-    models fill fields with values from prompt examples or other documents
-    (the same role for every author, a mass from another submission), so
-    this runs before the writing pass, which would otherwise build prose on
-    them. Names and identifiers are checked later by validators.
-    """
+    """Drop pass-1 values that are not copied from the document."""
     extraction = copy.deepcopy(extraction)
     haystack = _plain_source(source_text)
     changes: list[str] = []
@@ -413,7 +351,7 @@ def verify_extraction(extraction: dict, source_text: str) -> tuple[dict, list[st
             if not (_is_copied(value, source_text, haystack) or _tokens_in_source(value, source_text)):
                 changes.append(f"{where}: dropped keyword {value!r}: not in the document")
                 continue
-            kept.append({"subject": value})  # extra keys like subjectScheme were invented
+            kept.append({"subject": value})
         return kept
 
     shared["subjects"] = clean_subjects(shared.get("subjects"), "shared")
@@ -427,7 +365,6 @@ def verify_extraction(extraction: dict, source_text: str) -> tuple[dict, list[st
                 sample[field] = ""
         facts = []
         for fact in sample.get("facts") or []:
-            # "<column>: <value>" - the value is what must come from the document
             value = fact.split(":", 1)[1] if ":" in fact else fact
             if _is_copied(value, source_text, haystack) or _tokens_in_source(value, source_text):
                 facts.append(fact)
@@ -446,12 +383,7 @@ def build_records(
     texts: Optional[list[Optional[dict]]] = None,
     curator: Optional[dict] = None,
 ) -> tuple[list[dict], list[str]]:
-    """One complete IGSN record per sample. Returns (records, changes).
-
-    texts holds the writing pass result per sample (title, abstract); None
-    for a sample, or texts=None overall, falls back to the copied text.
-    curator is the DataCurator contributor from config.data_curator().
-    """
+    """One complete IGSN record per sample. Returns (records, changes)."""
     today = today or date.today()
     haystack = _normalize(source_text)
     changes: list[str] = []
@@ -460,8 +392,6 @@ def build_records(
     extracted_people = shared.get("creators") or []
     creators = [_creator(c, haystack, changes) for c in extracted_people]
 
-    # People with a stated role are creators and also contributors, as in
-    # the curated records; the curator comes last.
     contributors = []
     for person, creator in zip(extracted_people, creators):
         role = (person.get("role") or "").strip()
@@ -491,6 +421,8 @@ def build_records(
         keywords = []
         for keyword in (text or {}).get("keywords") or []:
             keyword = (keyword or "").strip()
+            if keyword and _normalize(keyword) == _normalize(sample.get("sampleCode") or ""):
+                continue  # a sample code is not a keyword
             if keyword and (_normalize(keyword) in haystack or _tokens_in_source(keyword, source_text)):
                 keywords.append({"subject": keyword})
             elif keyword:
@@ -528,12 +460,10 @@ def build_records(
                 key=lambda r: (r.get("relatedIdentifier") or "").lower()),
         }
 
-        # Validate against the full DataCite model; raises on anything invalid.
         validated = IGSN.model_validate(_plain(record)).model_dump(mode="json", exclude_none=True)
 
         if not validated.get("contributors"):
             validated.pop("contributors", None)
         records.append(validated)
 
-    # Per-sample passes repeat document-level notes; report each once.
     return records, list(dict.fromkeys(changes))
